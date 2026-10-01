@@ -1,44 +1,48 @@
-import { Appointment, ClientProfile, TimeSlot, BarberService } from '../types';
-import { initializeFirebase } from './firebaseClient';
-import { 
-  doc, 
-  setDoc, 
-  getDoc, 
-  getDocs, 
-  collection, 
-  query, 
-  where, 
-  runTransaction 
+/**
+ * Booking Service with Atomic Concurrency Protection,
+ * 45-minute Slot Intervals, and Direct Official WhatsApp Delivery
+ */
+
+import {
+  collection,
+  doc,
+  runTransaction,
+  getDocs,
+  query,
+  where,
+  Timestamp,
 } from 'firebase/firestore';
+import { initializeFirebase } from './firebaseClient';
+import { Appointment, BarberService, ClientProfile, TimeSlot } from '../types';
 
-const CLIENTS_STORAGE_KEY = 'rodrigo_clients_portfolio';
-const APPOINTMENTS_STORAGE_KEY = 'rodrigo_appointments_list';
+const APPOINTMENTS_STORAGE_KEY = 'rodrigo_barber_appointments_v2';
+const CLIENTS_STORAGE_KEY = 'rodrigo_barber_clients_v2';
 
-// Helper: Normalize phone to numbers only
-export function normalizePhone(rawPhone: string): string {
-  return rawPhone.replace(/\D/g, '');
+// Utility: Normalize phone number
+export function normalizePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10 || digits.length === 11) {
+    return '55' + digits;
+  }
+  return digits;
 }
 
-// Helper: Format raw phone into (XX) XXXXX-XXXX or (XX) XXXX-XXXX
-export function formatPhoneMask(value: string): string {
-  const digits = normalizePhone(value).slice(0, 11);
-  if (!digits) return '';
-  if (digits.length <= 2) return `(${digits}`;
-  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
-  if (digits.length <= 10) {
-    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+// Utility: Format mask (XX) XXXXX-XXXX
+export function formatPhoneMask(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
   }
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
 }
 
-// Helper: Validate Brazilian phone number
 export function isValidPhone(phone: string): boolean {
-  const digits = normalizePhone(phone);
-  // DDD (2 digits) + 8 or 9 digits -> total 10 or 11
-  return digits.length >= 10 && digits.length <= 11;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length === 10 || digits.length === 11;
 }
 
-// Local Storage Fallback Helpers
 function getLocalAppointments(): Appointment[] {
   try {
     const data = localStorage.getItem(APPOINTMENTS_STORAGE_KEY);
@@ -65,12 +69,15 @@ function saveLocalClients(clients: ClientProfile[]): void {
   localStorage.setItem(CLIENTS_STORAGE_KEY, JSON.stringify(clients));
 }
 
-// Generate Time Slots for a given date
+/**
+ * Generate Time Slots for a given date with 45-minute intervals
+ * Default: 09:00 to 19:00, 45 mins -> 09:00, 09:45, 10:30, 11:15, 12:00, 12:45, 13:30, 14:15, 15:00, 15:45, 16:30, 17:15, 18:00, 18:45
+ */
 export async function getAvailableTimeSlots(
   dateString: string,
   startHourStr: string = '09:00',
   endHourStr: string = '19:00',
-  intervalMinutes: number = 30
+  intervalMinutes: number = 45
 ): Promise<TimeSlot[]> {
   const [startH, startM] = startHourStr.split(':').map(Number);
   const [endH, endM] = endHourStr.split(':').map(Number);
@@ -93,7 +100,7 @@ export async function getAvailableTimeSlots(
       const snapshot = await getDocs(q);
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
-        if (data.time) {
+        if (data?.time) {
           bookedTimes.add(data.time);
         }
       });
@@ -158,9 +165,9 @@ export interface BookingPayload {
   clientName: string;
   clientPhone: string;
   service: BarberService;
-  date: string; // YYYY-MM-DD
-  time: string; // HH:MM
-  consentCommunication: boolean;
+  date: string;
+  time: string;
+  consentCommunication?: boolean;
 }
 
 export interface BookingResult {
@@ -172,60 +179,57 @@ export interface BookingResult {
 }
 
 /**
- * Creates appointment with strict double-booking prevention.
- * If another user reserved the same date/time simultaneously, returns error.
+ * Creates an appointment with atomic locking and builds the rich WhatsApp redirect URL
  */
 export async function createAppointment(
   payload: BookingPayload,
   rodrigoWhatsAppNumber: string
 ): Promise<BookingResult> {
-  const { clientName, clientPhone, service, date, time, consentCommunication } = payload;
-
-  if (!clientName || clientName.trim().length < 2) {
-    return { success: false, errorMessage: 'Por favor, informe seu nome completo.' };
-  }
-
-  if (!isValidPhone(clientPhone)) {
-    return { success: false, errorMessage: 'Por favor, informe um WhatsApp válido com DDD.' };
-  }
-
+  const { clientName, clientPhone, service, date, time, consentCommunication = true } = payload;
   const cleanPhone = normalizePhone(clientPhone);
-  const nowIso = new Date().toISOString();
-  const appointmentId = `app_${date.replace(/-/g, '')}_${time.replace(':', '')}_${cleanPhone.slice(-4)}`;
-  const lockSlotId = `slot_${date}_${time.replace(':', '')}`;
 
+  const appointmentId = `app_${date}_${time.replace(':', '')}_${cleanPhone.slice(-4)}_${Date.now()}`;
+  const lockSlotId = `slot_${date}_${time.replace(':', '')}`;
+  const nowIso = new Date().toISOString();
+
+  // Try Firebase Firestore Atomic Transaction first if live
   const { db, isLive } = initializeFirebase();
 
-  // 1. Double-booking check & Firestore transaction if available
   if (isLive && db) {
     try {
       let appointmentCreated: Appointment | null = null;
       let clientSaved: ClientProfile | null = null;
 
       await runTransaction(db, async (transaction) => {
-        const slotRef = doc(db, 'schedule_slots', lockSlotId);
-        const slotSnap = await transaction.get(slotRef);
+        // Read slot lock
+        const slotRef = doc(db, 'slotLocks', lockSlotId);
+        const slotDoc = await transaction.get(slotRef);
 
-        if (slotSnap.exists() && slotSnap.data()?.status === 'confirmed') {
+        if (slotDoc.exists() && slotDoc.data()?.status === 'confirmed') {
           throw new Error('SLOT_ALREADY_TAKEN');
         }
 
-        // Prepare client data
+        // Upsert client
         const clientRef = doc(db, 'clients', cleanPhone);
-        const clientSnap = await transaction.get(clientRef);
+        const clientDoc = await transaction.get(clientRef);
 
-        if (clientSnap.exists()) {
-          const prev = clientSnap.data() as ClientProfile;
+        if (clientDoc.exists()) {
+          const prev = clientDoc.data() as ClientProfile;
           clientSaved = {
             ...prev,
             name: clientName.trim(),
             phone: formatPhoneMask(cleanPhone),
             lastUpdatedAt: nowIso,
-            consentCommunication: consentCommunication,
+            consentCommunication,
             consentTimestamp: consentCommunication ? (prev.consentTimestamp || nowIso) : null,
             totalAppointments: (prev.totalAppointments || 0) + 1,
           };
-          transaction.set(clientRef, clientSaved, { merge: true });
+          transaction.update(clientRef, {
+            name: clientName.trim(),
+            lastUpdatedAt: Timestamp.now(),
+            consentCommunication,
+            totalAppointments: (prev.totalAppointments || 0) + 1,
+          });
         } else {
           clientSaved = {
             id: cleanPhone,
@@ -234,14 +238,18 @@ export async function createAppointment(
             normalizedPhone: cleanPhone,
             firstRegisteredAt: nowIso,
             lastUpdatedAt: nowIso,
-            consentCommunication: consentCommunication,
+            consentCommunication,
             consentTimestamp: consentCommunication ? nowIso : null,
             totalAppointments: 1,
           };
-          transaction.set(clientRef, clientSaved);
+          transaction.set(clientRef, {
+            ...clientSaved,
+            createdAt: Timestamp.now(),
+            lastUpdatedAt: Timestamp.now(),
+          });
         }
 
-        // Prepare appointment data
+        // Create appointment
         appointmentCreated = {
           id: appointmentId,
           clientId: cleanPhone,
@@ -284,7 +292,10 @@ export async function createAppointment(
       const whatsAppRedirectUrl = buildWhatsAppMessageUrl(
         rodrigoWhatsAppNumber,
         time,
-        service.name
+        service.name,
+        date,
+        service.price,
+        clientName
       );
 
       return {
@@ -370,7 +381,10 @@ export async function createAppointment(
   const whatsAppRedirectUrl = buildWhatsAppMessageUrl(
     rodrigoWhatsAppNumber,
     time,
-    service.name
+    service.name,
+    date,
+    service.price,
+    clientName
   );
 
   return {
@@ -382,33 +396,50 @@ export async function createAppointment(
 }
 
 /**
- * Builds the exact required WhatsApp redirect URL:
- * "Olá Rodrigo, eu agendei às [horário agendado], para fazer [nome do serviço]."
+ * Builds the official WhatsApp direct URL with emojis, service, date, time, total price and client name.
+ * Directs to https://api.whatsapp.com/send?phone=... to ensure text is immediately pre-filled on all devices.
  */
 export function buildWhatsAppMessageUrl(
   rodrigoContact: string,
   time: string,
-  serviceName: string
+  serviceName: string,
+  date?: string,
+  totalPrice?: number,
+  clientName?: string
 ): string {
-  const message = `Olá Rodrigo, eu agendei às ${time}, para fazer ${serviceName}.`;
-  
-  if (rodrigoContact.includes('wa.link')) {
-    // wa.link supports query text parameter
-    const separator = rodrigoContact.includes('?') ? '&' : '?';
-    return `${rodrigoContact}${separator}text=${encodeURIComponent(message)}`;
+  const formattedDate = date ? date.split('-').reverse().join('/') : '';
+  const priceFormatted = typeof totalPrice === 'number' ? `R$ ${totalPrice.toFixed(2).replace('.', ',')}` : '';
+
+  const lines = [
+    `💈 *Olá Rodrigo! Acabei de agendar meu horário pelo seu site:*`,
+    ``,
+    clientName ? `👤 *Cliente:* ${clientName.trim()}` : null,
+    `✂️ *Serviço:* ${serviceName}`,
+    formattedDate ? `📅 *Data:* ${formattedDate}` : null,
+    `⏰ *Horário:* ${time}`,
+    priceFormatted ? `💰 *Valor Total:* ${priceFormatted}` : null,
+    ``,
+    `Por favor, pode confirmar para mim? Valeu! 🤝`,
+  ].filter((l): l is string => l !== null);
+
+  const message = lines.join('\n');
+
+  // Direct phone number of Rodrigo (5585981691641)
+  let phone = '5585981691641';
+  if (rodrigoContact && !rodrigoContact.includes('wa.link') && normalizePhone(rodrigoContact)) {
+    phone = normalizePhone(rodrigoContact);
   }
 
-  const cleanNumber = normalizePhone(rodrigoContact) || '5511999999999';
-  return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(message)}`;
+  return `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
 }
 
 export function buildDirectWhatsAppContactUrl(rodrigoContact: string): string {
-  if (rodrigoContact.includes('wa.link') || rodrigoContact.startsWith('http')) {
-    return rodrigoContact;
+  let phone = '5585981691641';
+  if (rodrigoContact && !rodrigoContact.includes('wa.link') && normalizePhone(rodrigoContact)) {
+    phone = normalizePhone(rodrigoContact);
   }
-  const cleanNumber = normalizePhone(rodrigoContact) || '5511999999999';
-  const greeting = 'Olá Rodrigo Barbeiro! Gostaria de tirar uma dúvida sobre seus serviços e horários.';
-  return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(greeting)}`;
+  const greeting = 'Olá Rodrigo Barbeiro! Gostaria de tirar uma dúvida sobre seus serviços e horários no Icaraí.';
+  return `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(greeting)}`;
 }
 
 export function getAllSavedAppointments(): Appointment[] {

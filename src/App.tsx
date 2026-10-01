@@ -27,15 +27,22 @@ export default function App() {
           !parsed.customLogoUrl || parsed.customLogoUrl.includes('5tPSF7wF')
             ? DEFAULT_RODRIGO_CONFIG.customLogoUrl
             : parsed.customLogoUrl;
+        const images =
+          parsed.customImages && parsed.customImages.length > 0 && !parsed.customImages[0].includes('postimg.cc')
+            ? parsed.customImages
+            : DEFAULT_RODRIGO_CONFIG.customImages;
         return {
           ...DEFAULT_RODRIGO_CONFIG,
           ...parsed,
           customLogoUrl: logo,
           whatsappUrl: parsed.whatsappUrl || DEFAULT_RODRIGO_CONFIG.whatsappUrl,
+          whatsappNumber: '5585981691641',
           locationUrl: parsed.locationUrl || DEFAULT_RODRIGO_CONFIG.locationUrl,
-          customImages: parsed.customImages && parsed.customImages.length > 0 
-            ? parsed.customImages 
-            : DEFAULT_RODRIGO_CONFIG.customImages,
+          customImages: images,
+          operatingHours: {
+            ...DEFAULT_RODRIGO_CONFIG.operatingHours,
+            slotIntervalMinutes: 45,
+          },
         };
       }
     } catch (e) {

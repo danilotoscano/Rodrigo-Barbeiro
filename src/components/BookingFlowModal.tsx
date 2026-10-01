@@ -81,7 +81,7 @@ export function BookingFlowModal({
     async function fetchSlots() {
       setIsLoadingSlots(true);
       try {
-        const availableSlots = await getAvailableTimeSlots(selectedDate);
+        const availableSlots = await getAvailableTimeSlots(selectedDate, '09:00', '19:00', 45);
         if (isMounted) {
           setSlots(availableSlots);
           // If current selected time is no longer available, reset it
@@ -721,26 +721,40 @@ export function BookingFlowModal({
                 </div>
               </div>
 
-              {/* WhatsApp direct instruction as required in Section 24 */}
+              {/* WhatsApp direct instruction as required */}
               <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-left">
                 <p className="text-xs text-emerald-300 font-semibold mb-1 flex items-center gap-1.5">
                   <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
-                  Próximo passo: Conversar com Rodrigo
+                  Próximo passo: Conversar com Rodrigo no WhatsApp
                 </p>
-                <p className="text-[11px] text-zinc-300">
-                  Clique no botão abaixo para abrir a conversa no WhatsApp com a mensagem automática já preenchida:
+                <p className="text-[11px] text-zinc-300 mb-2">
+                  Clique no botão abaixo para abrir a conversa no WhatsApp do Rodrigo. A mensagem já vai preenchida com todos os dados:
                 </p>
-                <div className="mt-2 p-2 rounded bg-black/50 border border-emerald-900/60 font-mono text-[11px] text-emerald-200 italic flex items-center justify-between gap-2">
-                  <span>"Olá Rodrigo, eu agendei às {confirmedAppointment.time}, para fazer {confirmedAppointment.serviceName}."</span>
+
+                {/* Message Preview Box */}
+                <div className="p-3 rounded-lg bg-black/60 border border-emerald-900/60 font-sans text-xs text-emerald-200/90 leading-relaxed whitespace-pre-line">
+                  {`💈 *Olá Rodrigo! Acabei de agendar meu horário pelo seu site:*
+
+👤 *Cliente:* ${confirmedAppointment.clientName}
+✂️ *Serviço:* ${confirmedAppointment.serviceName}
+📅 *Data:* ${confirmedAppointment.date.split('-').reverse().join('/')}
+⏰ *Horário:* ${confirmedAppointment.time}
+💰 *Valor Total:* R$ ${confirmedAppointment.servicePrice.toFixed(2).replace('.', ',')}
+
+Por favor, pode confirmar para mim? Valeu! 🤝`}
+                </div>
+
+                <div className="flex justify-end mt-2">
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(`Olá Rodrigo, eu agendei às ${confirmedAppointment.time}, para fazer ${confirmedAppointment.serviceName}.`);
+                      const text = `💈 Olá Rodrigo! Acabei de agendar meu horário pelo seu site:\n\n👤 Cliente: ${confirmedAppointment.clientName}\n✂️ Serviço: ${confirmedAppointment.serviceName}\n📅 Data: ${confirmedAppointment.date.split('-').reverse().join('/')}\n⏰ Horário: ${confirmedAppointment.time}\n💰 Valor Total: R$ ${confirmedAppointment.servicePrice.toFixed(2).replace('.', ',')}\n\nPor favor, pode confirmar para mim? Valeu! 🤝`;
+                      navigator.clipboard.writeText(text);
                       alert('Mensagem copiada para a área de transferência!');
                     }}
-                    className="text-[10px] bg-emerald-900/80 hover:bg-emerald-800 text-white font-sans font-bold px-2 py-1 rounded transition flex-shrink-0"
+                    className="text-[11px] bg-emerald-900/80 hover:bg-emerald-800 text-emerald-100 font-semibold px-2.5 py-1 rounded transition"
                   >
-                    Copiar
+                    Copiar Mensagem
                   </button>
                 </div>
               </div>
@@ -751,10 +765,14 @@ export function BookingFlowModal({
                   href={whatsAppRedirectUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => {
+                    // Direct trigger for mobile devices
+                    window.location.href = whatsAppRedirectUrl;
+                  }}
                   className="flex items-center justify-center gap-2 w-full bg-[#25D366] hover:bg-[#20ba59] text-black font-black text-sm uppercase py-4 px-6 rounded-xl shadow-lg transition active:scale-98"
                 >
                   <ExternalLink className="w-5 h-5 text-black" />
-                  <span>ABRIR WHATSAPP DO RODRIGO</span>
+                  <span>ENVIAR NO WHATSAPP DO RODRIGO</span>
                 </a>
               )}
 

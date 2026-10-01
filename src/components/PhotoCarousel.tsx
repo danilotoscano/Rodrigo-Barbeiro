@@ -8,17 +8,34 @@ interface PhotoCarouselProps {
 }
 
 export function PhotoCarousel({ customImages, onBookClick }: PhotoCarouselProps) {
-  const images = customImages && customImages.length > 0 
-    ? customImages.map((url, i) => ({
-        url,
+  // Normalize images: map any legacy postimg URLs to instant-loading local assets
+  const images = (customImages && customImages.length > 0 ? customImages : RODRIGO_REAL_IMAGES.map(img => img.url))
+    .map((url, i) => {
+      let resolvedUrl = url;
+      if (url.includes('postimg.cc') || !url.startsWith('/images/')) {
+        resolvedUrl = `/images/cliente-${(i % 5) + 1}.jpg`;
+      }
+      return {
+        url: resolvedUrl,
         title: RODRIGO_REAL_IMAGES[i]?.title || `Corte & Estilo #${i + 1}`,
-        category: RODRIGO_REAL_IMAGES[i]?.category || 'Trabalho do Rodrigo'
-      }))
-    : RODRIGO_REAL_IMAGES;
+        category: RODRIGO_REAL_IMAGES[i]?.category || 'Trabalho do Rodrigo',
+      };
+    });
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const touchStartX = useRef<number | null>(null);
+
+  // Pre-decode all images in background immediately on mount for 0-latency slide switches
+  useEffect(() => {
+    images.forEach(item => {
+      const img = new Image();
+      img.src = item.url;
+      if ('decode' in img) {
+        img.decode().catch(() => {});
+      }
+    });
+  }, []);
 
   // Autoplay
   useEffect(() => {
@@ -87,7 +104,7 @@ export function PhotoCarousel({ customImages, onBookClick }: PhotoCarouselProps)
           return (
             <div
               key={index}
-              className={`absolute inset-0 transition-all duration-700 ease-in-out ${
+              className={`absolute inset-0 transition-all duration-500 ease-out ${
                 isActive 
                   ? 'opacity-100 scale-100 z-10 pointer-events-auto' 
                   : 'opacity-0 scale-105 z-0 pointer-events-none'
@@ -97,7 +114,8 @@ export function PhotoCarousel({ customImages, onBookClick }: PhotoCarouselProps)
                 src={item.url}
                 alt={item.title}
                 className="w-full h-full object-cover object-center filter brightness-[0.95]"
-                loading={index === 0 ? 'eager' : 'lazy'}
+                loading={index < 2 ? 'eager' : 'lazy'}
+                decoding="async"
               />
 
               {/* Cinematic Vignette Overlay */}
