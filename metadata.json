@@ -1,0 +1,6 @@
+{
+  "name": "Rodrigo Barbeiro — Biosite Profissional",
+  "description": "Biosite profissional e pessoal de Rodrigo Barbeiro. Conheça os serviços, consulte valores e agende seu horário com praticidade pelo WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

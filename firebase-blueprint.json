@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "Client": {
+      "title": "Client",
+      "description": "Perfil do cliente na carteira profissional de Rodrigo Barbeiro",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "WhatsApp normalizado com DDD" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 20 },
+        "normalizedPhone": { "type": "string", "maxLength": 15 },
+        "firstRegisteredAt": { "type": "string", "format": "date-time" },
+        "lastUpdatedAt": { "type": "string", "format": "date-time" },
+        "consentCommunication": { "type": "boolean" },
+        "consentTimestamp": { "type": "string" },
+        "totalAppointments": { "type": "integer" }
+      },
+      "required": ["id", "name", "phone", "normalizedPhone", "firstRegisteredAt", "lastUpdatedAt", "totalAppointments"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Registro de agendamento de serviço com Rodrigo Barbeiro",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "clientPhone": { "type": "string" },
+        "serviceId": { "type": "string" },
+        "serviceName": { "type": "string" },
+        "servicePrice": { "type": "number" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "status": { "type": "string", "enum": ["confirmed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "clientId", "clientName", "clientPhone", "serviceId", "serviceName", "servicePrice", "date", "time", "status", "createdAt"]
+    },
+    "ScheduleSlot": {
+      "title": "ScheduleSlot",
+      "description": "Bloqueio atômico de slot para evitar agendamento duplo simultâneo",
+      "type": "object",
+      "properties": {
+        "slotId": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "status": { "type": "string", "enum": ["confirmed", "available"] },
+        "appointmentId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["slotId", "date", "time", "status", "appointmentId", "clientId", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/clients/{clientId}": {
+      "schema": { "$ref": "Client" },
+      "description": "Carteira de clientes do Rodrigo Barbeiro"
+    },
+    "/appointments/{appointmentId}": {
+      "schema": { "$ref": "Appointment" },
+      "description": "Agendamentos realizados"
+    },
+    "/schedule_slots/{slotId}": {
+      "schema": { "$ref": "ScheduleSlot" },
+      "description": "Travas de horário para prevenção de agendamentos simultâneos duplicados"
+    }
+  }
+}
