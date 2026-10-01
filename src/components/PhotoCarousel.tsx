@@ -26,17 +26,6 @@ export function PhotoCarousel({ customImages, onBookClick }: PhotoCarouselProps)
   const [isPaused, setIsPaused] = useState(false);
   const touchStartX = useRef<number | null>(null);
 
-  // Pre-decode all images in background immediately on mount for 0-latency slide switches
-  useEffect(() => {
-    images.forEach(item => {
-      const img = new Image();
-      img.src = item.url;
-      if ('decode' in img) {
-        img.decode().catch(() => {});
-      }
-    });
-  }, []);
-
   // Autoplay
   useEffect(() => {
     if (isPaused || images.length <= 1) return;
@@ -114,7 +103,7 @@ export function PhotoCarousel({ customImages, onBookClick }: PhotoCarouselProps)
                 src={item.url}
                 alt={item.title}
                 className="w-full h-full object-cover object-center filter brightness-[0.95]"
-                loading={index < 2 ? 'eager' : 'lazy'}
+                loading="lazy"
                 decoding="async"
               />
 
